@@ -82,7 +82,21 @@ impl<'a, T: Read + Write + 'a> Handle<'a, T> {
         if !self.done {
             self.done = true;
             self.session.write_line(b"DONE")?;
-            self.session.read_response().map(|_| ())
+            match self.session.read_response() {
+                Ok(res) => {
+                    let s = String::from_utf8(res.to_vec()).unwrap();
+                    println!("idle.terminate() got {:?}", &s);
+                    if s.is_empty() {
+                        Err(Error::Bad(format!("terminate got not response")))
+                    } else {
+                        Ok(())
+                    }
+                }
+                Err(err) => {
+                    eprintln!("idle.terminate() got {:?}", err);
+                    Err(err)
+                }
+            }
         } else {
             Ok(())
         }
@@ -91,7 +105,10 @@ impl<'a, T: Read + Write + 'a> Handle<'a, T> {
     /// Internal helper that doesn't consume self.
     ///
     /// This is necessary so that we can keep using the inner `Session` in `wait_keepalive`.
-    fn wait_inner(&mut self) -> Result<()> {
+    /// return Ok(true) if server reported data, Ok(false) if we ran
+    /// into a timeout but idle-waiting can continue.  Any error means
+    /// that the underlying stream was closed and a reconnect is neccessary
+    fn wait_inner(&mut self) -> Result<bool> {
         let mut v = Vec::new();
         match self.session.readline(&mut v).map(|_| ()) {
             Err(Error::Io(ref e))
@@ -101,14 +118,15 @@ impl<'a, T: Read + Write + 'a> Handle<'a, T> {
                     eprintln!("idle-got error {:?}", e);
                 }
                 self.terminate()?;
-                Err(Error::Bad(format!("idle wait_inner failed: {}", e)))
+                Ok(false) // Err(Error::Bad(format!("idle wait_inner failed: {}", e)))
             }
-            r => r,
+            Err(err) => Err(err),
+            Ok(_) => Ok(true),
         }
     }
 
     /// Block until the selected mailbox changes.
-    pub fn wait(mut self) -> Result<()> {
+    pub fn wait(mut self) -> Result<bool> {
         self.wait_inner()
     }
 }
@@ -129,7 +147,7 @@ impl<'a, T: SetReadTimeout + Read + Write + 'a> Handle<'a, T> {
     /// [`Handle::set_keepalive`].
     ///
     /// This is the recommended method to use for waiting.
-    pub fn wait_keepalive(self) -> Result<()> {
+    pub fn wait_keepalive(self) -> Result<bool> {
         // The server MAY consider a client inactive if it has an IDLE command
         // running, and if such a server has an inactivity timeout it MAY log
         // the client off implicitly at the end of its timeout period.  Because
@@ -142,7 +160,7 @@ impl<'a, T: SetReadTimeout + Read + Write + 'a> Handle<'a, T> {
     }
 
     /// Block until the selected mailbox changes, or until the given amount of time has expired.
-    pub fn wait_timeout(mut self, timeout: Duration) -> Result<()> {
+    pub fn wait_timeout(mut self, timeout: Duration) -> Result<bool> {
         self.session
             .stream
             .get_mut()

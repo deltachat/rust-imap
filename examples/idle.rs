@@ -1,8 +1,8 @@
 extern crate imap;
 extern crate native_tls;
 use std::env;
-use std::time::Duration;
 use std::net::Shutdown;
+use std::time::Duration;
 
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -44,14 +44,22 @@ fn fetch_messages_and_idle(server: &str, login: &str, password: &str) -> imap::e
                     return Err(imap::error::Error::Bad(err.to_string()));
                 }
             };
-            println!("wait_keepalive returned {}", res.is_ok());
-            if res.is_err() {
-                eprintln!("error s- shutdown imap_session's underlying socket");
-                imap_session.stream.get_mut().get_mut().shutdown(Shutdown::Both)?;
-                eprintln!("error {:?}", res);
-                return Err(imap::error::Error::Bad("wait_keepalive failed".to_string()));
-            } 
-            break;
+            match res {
+                Ok(true) => {
+                    println!("wait_keepalive returned data, idle-finished");
+                    break;
+                }
+                Ok(false) => println!("wait_keepalive returned no data, let's re-enter idle"),
+                Err(err) => {
+                    eprintln!("wait_keepalive returned error {} -- SHUTTING DOWN", err);
+                    imap_session
+                        .stream
+                        .get_mut()
+                        .get_mut()
+                        .shutdown(Shutdown::Both)?;
+                    return Err(imap::error::Error::Bad("wait_keepalive failed".to_string()));
+                }
+            }
         }
     }
 
