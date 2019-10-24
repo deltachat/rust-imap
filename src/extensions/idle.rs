@@ -158,31 +158,26 @@ impl<'a, T: SetReadTimeout + Read + Write + 'a> Handle<'a, T> {
             .stream
             .get_mut()
             .set_read_timeout(Some(timeout))?;
-        let res = self.wait_inner_keepalive();
-        res
+        self.wait_inner_keepalive()
     }
 
     fn wait_inner_keepalive(&mut self) -> Result<bool> {
         let mut v = Vec::new();
-        match self.session.readline(&mut v) {
+        let read_result = self.session.readline(&mut v);
+        self.restore_timeout()?;
+
+        match read_result {
             Err(Error::Io(ref e))
                 if e.kind() == io::ErrorKind::TimedOut || e.kind() == io::ErrorKind::WouldBlock =>
             {
                 if self.session.debug {
                     eprintln!("wait_inner got error {:?}", e);
                 }
-                self.restore_timeout()?;
                 self.terminate()?;
                 Ok(false)
             }
-            Err(err) => {
-                self.restore_timeout()?;
-                Err(err)
-            }
-            Ok(_) => {
-                self.restore_timeout()?;
-                Ok(true)
-            }
+            Err(err) => Err(err),
+            Ok(_) => Ok(true),
         }
     }
 
