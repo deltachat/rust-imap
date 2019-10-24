@@ -1199,11 +1199,11 @@ impl<T: Read + Write> Connection<T> {
 
             match break_with {
                 Some(Ok(_)) => {
-                    eprintln!(
-                        "truncating {} with line_start={}",
-                        String::from_utf8(data.to_vec()).unwrap(),
-                        line_start
-                    );
+                    //eprintln!(
+                    //    "truncating {} with line_start={}",
+                    //    String::from_utf8(data.to_vec()).unwrap(),
+                    //    line_start
+                    //);
                     data.truncate(line_start);
                     break Ok(());
                 }
