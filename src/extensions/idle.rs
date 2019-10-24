@@ -82,6 +82,7 @@ impl<'a, T: Read + Write + 'a> Handle<'a, T> {
         if !self.done {
             self.done = true;
             self.session.write_line(b"DONE")?;
+            self.session.stream.get_mut().flush()?;
             self.session.read_response().map(|_| ())
         } else {
             Ok(())
