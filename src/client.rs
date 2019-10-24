@@ -72,7 +72,7 @@ pub struct Client<T: Read + Write> {
 #[derive(Debug)]
 #[doc(hidden)]
 pub struct Connection<T: Read + Write> {
-    pub(crate) stream: BufStream<T>,
+    pub stream: BufStream<T>,
     tag: u32,
 
     /// Enable debug mode for this connection so that all client-server interactions are printed to

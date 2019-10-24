@@ -98,12 +98,10 @@ impl<'a, T: Read + Write + 'a> Handle<'a, T> {
                 if e.kind() == io::ErrorKind::TimedOut || e.kind() == io::ErrorKind::WouldBlock =>
             {
                 if self.session.debug {
-                    eprintln!("idle-restart after error {:?}", e);
+                    eprintln!("idle-got error {:?}", e);
                 }
-                // we need to refresh the IDLE connection
                 self.terminate()?;
-                self.init()?;
-                self.wait_inner()
+                Err(Error::Bad(format!("idle wait_inner failed: {}", e)))
             }
             r => r,
         }
