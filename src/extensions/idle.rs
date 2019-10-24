@@ -190,7 +190,7 @@ impl<'a, T: SetReadTimeout + Read + Write + 'a> Handle<'a, T> {
         self.session
             .stream
             .get_mut()
-            .set_read_timeout(self.old_timeout)
+            .set_read_timeout(self.old_timeout.take())
     }
 }
 
