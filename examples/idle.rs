@@ -49,7 +49,9 @@ fn fetch_messages_and_idle(server: &str, login: &str, password: &str) -> imap::e
                     println!("wait_keepalive returned data, idle-finished");
                     break;
                 }
-                Ok(false) => println!("wait_keepalive returned no data, let's re-enter idle"),
+                Ok(false) => {
+                    println!("wait_keepalive returned no data, let's re-enter idle");
+                }
                 Err(err) => {
                     eprintln!("wait_keepalive returned error {} -- SHUTTING DOWN", err);
                     imap_session

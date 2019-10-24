@@ -1204,9 +1204,7 @@ impl<T: Read + Write> Connection<T> {
                         String::from_utf8(data.to_vec()).unwrap(),
                         line_start
                     );
-                    if line_start != 0 {
-                        data.truncate(line_start);
-                    }
+                    data.truncate(line_start);
                     break Ok(());
                 }
                 Some(Err((status, expl))) => {

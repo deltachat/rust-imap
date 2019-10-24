@@ -86,11 +86,7 @@ impl<'a, T: Read + Write + 'a> Handle<'a, T> {
                 Ok(res) => {
                     let s = String::from_utf8(res.to_vec()).unwrap();
                     println!("idle.terminate() got {:?}", &s);
-                    if s.is_empty() {
-                        Err(Error::Bad(format!("terminate got not response")))
-                    } else {
-                        Ok(())
-                    }
+                    Ok(())
                 }
                 Err(err) => {
                     eprintln!("idle.terminate() got {:?}", err);
