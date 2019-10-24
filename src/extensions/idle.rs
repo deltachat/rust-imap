@@ -82,17 +82,7 @@ impl<'a, T: Read + Write + 'a> Handle<'a, T> {
         if !self.done {
             self.done = true;
             self.session.write_line(b"DONE")?;
-            match self.session.read_response() {
-                Ok(res) => {
-                    let s = String::from_utf8(res.to_vec()).unwrap();
-                    println!("idle.terminate() got {:?}", &s);
-                    Ok(())
-                }
-                Err(err) => {
-                    eprintln!("idle.terminate() got {:?}", err);
-                    Err(err)
-                }
-            }
+            self.session.read_response().map(|_| ())
         } else {
             Ok(())
         }
@@ -111,10 +101,10 @@ impl<'a, T: Read + Write + 'a> Handle<'a, T> {
                 if e.kind() == io::ErrorKind::TimedOut || e.kind() == io::ErrorKind::WouldBlock =>
             {
                 if self.session.debug {
-                    eprintln!("idle-got error {:?}", e);
+                    eprintln!("wait_inner got error {:?}", e);
                 }
                 self.terminate()?;
-                Ok(false) // Err(Error::Bad(format!("idle wait_inner failed: {}", e)))
+                Ok(false)
             }
             Err(err) => Err(err),
             Ok(_) => Ok(true),

@@ -1140,7 +1140,6 @@ impl<T: Read + Write> Connection<T> {
     pub(crate) fn read_response(&mut self) -> Result<Vec<u8>> {
         let mut v = Vec::new();
         self.read_response_onto(&mut v)?;
-        eprintln!("read_response len={}", v.len());
         Ok(v)
     }
 
@@ -1148,7 +1147,6 @@ impl<T: Read + Write> Connection<T> {
         let mut continue_from = None;
         let mut try_first = !data.is_empty();
         let match_tag = format!("{}{}", TAG_PREFIX, self.tag);
-        eprintln!("read_response_onto: looking for match_tag {}", match_tag);
         loop {
             let line_start = if try_first {
                 try_first = false;
@@ -1156,10 +1154,6 @@ impl<T: Read + Write> Connection<T> {
             } else {
                 let start_new = data.len();
                 self.readline(data)?;
-                eprintln!(
-                    "read_response_onto-readline: {}",
-                    String::from_utf8(data.to_vec()).unwrap()
-                );
                 continue_from.take().unwrap_or(start_new)
             };
 
@@ -1177,8 +1171,6 @@ impl<T: Read + Write> Connection<T> {
                             ..
                         },
                     )) => {
-                        eprintln!("matched {}", String::from_utf8(line.to_vec()).unwrap());
-                        eprintln!("line-start {}", line_start);
                         assert_eq!(tag.as_bytes(), match_tag.as_bytes());
                         Some(match status {
                             Status::Bad | Status::No => {
@@ -1199,11 +1191,6 @@ impl<T: Read + Write> Connection<T> {
 
             match break_with {
                 Some(Ok(_)) => {
-                    //eprintln!(
-                    //    "truncating {} with line_start={}",
-                    //    String::from_utf8(data.to_vec()).unwrap(),
-                    //    line_start
-                    //);
                     data.truncate(line_start);
                     break Ok(());
                 }
