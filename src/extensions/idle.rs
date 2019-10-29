@@ -29,6 +29,7 @@ pub struct Handle<'a, T: Read + Write> {
     session: &'a mut Session<T>,
     keepalive: Duration,
     done: bool,
+    old_timeout: Option<Duration>,
 }
 
 /// Must be implemented for a transport in order for a `Session` using that transport to support
@@ -43,6 +44,9 @@ pub trait SetReadTimeout {
     ///
     /// See also `std::net::TcpStream::set_read_timeout`.
     fn set_read_timeout(&mut self, timeout: Option<Duration>) -> Result<()>;
+
+    /// Returns the read timeout of this socket.
+    fn read_timeout(&self) -> Result<Option<Duration>>;
 }
 
 impl<'a, T: Read + Write + 'a> Handle<'a, T> {
@@ -51,6 +55,7 @@ impl<'a, T: Read + Write + 'a> Handle<'a, T> {
             session,
             keepalive: Duration::from_secs(29 * 60),
             done: false,
+            old_timeout: None,
         };
         h.init()?;
         Ok(h)
@@ -82,6 +87,7 @@ impl<'a, T: Read + Write + 'a> Handle<'a, T> {
         if !self.done {
             self.done = true;
             self.session.write_line(b"DONE")?;
+            self.session.stream.get_mut().flush()?;
             self.session.read_response().map(|_| ())
         } else {
             Ok(())
@@ -91,23 +97,28 @@ impl<'a, T: Read + Write + 'a> Handle<'a, T> {
     /// Internal helper that doesn't consume self.
     ///
     /// This is necessary so that we can keep using the inner `Session` in `wait_keepalive`.
-    fn wait_inner(&mut self) -> Result<()> {
+    /// return Ok(true) if server reported data, Ok(false) if we ran
+    /// into a timeout but idle-waiting can continue.  Any error means
+    /// that the underlying stream was closed and a reconnect is neccessary
+    fn wait_inner(&mut self) -> Result<bool> {
         let mut v = Vec::new();
-        match self.session.readline(&mut v).map(|_| ()) {
+        match self.session.readline(&mut v) {
             Err(Error::Io(ref e))
                 if e.kind() == io::ErrorKind::TimedOut || e.kind() == io::ErrorKind::WouldBlock =>
             {
-                // we need to refresh the IDLE connection
+                if self.session.debug {
+                    eprintln!("wait_inner got error {:?}", e);
+                }
                 self.terminate()?;
-                self.init()?;
-                self.wait_inner()
+                Ok(false)
             }
-            r => r,
+            Err(err) => Err(err),
+            Ok(_) => Ok(true),
         }
     }
 
     /// Block until the selected mailbox changes.
-    pub fn wait(mut self) -> Result<()> {
+    pub fn wait(mut self) -> Result<bool> {
         self.wait_inner()
     }
 }
@@ -128,7 +139,7 @@ impl<'a, T: SetReadTimeout + Read + Write + 'a> Handle<'a, T> {
     /// [`Handle::set_keepalive`].
     ///
     /// This is the recommended method to use for waiting.
-    pub fn wait_keepalive(self) -> Result<()> {
+    pub fn wait_keepalive(self) -> Result<bool> {
         // The server MAY consider a client inactive if it has an IDLE command
         // running, and if such a server has an inactivity timeout it MAY log
         // the client off implicitly at the end of its timeout period.  Because
@@ -141,14 +152,44 @@ impl<'a, T: SetReadTimeout + Read + Write + 'a> Handle<'a, T> {
     }
 
     /// Block until the selected mailbox changes, or until the given amount of time has expired.
-    pub fn wait_timeout(mut self, timeout: Duration) -> Result<()> {
+    pub fn wait_timeout(mut self, timeout: Duration) -> Result<bool> {
+        self.old_timeout = self.session.stream.get_mut().read_timeout()?;
         self.session
             .stream
             .get_mut()
             .set_read_timeout(Some(timeout))?;
-        let res = self.wait_inner();
-        let _ = self.session.stream.get_mut().set_read_timeout(None).is_ok();
-        res
+        self.wait_inner_keepalive()
+    }
+
+    fn wait_inner_keepalive(&mut self) -> Result<bool> {
+        let mut v = Vec::new();
+
+        match self.session.readline(&mut v).map(|_| true) {
+            Err(Error::Io(ref e))
+                if e.kind() == io::ErrorKind::TimedOut || e.kind() == io::ErrorKind::WouldBlock =>
+            {
+                if self.session.debug {
+                    eprintln!("wait_inner got error {:?}", e);
+                }
+                self.session
+                    .stream
+                    .get_mut()
+                    .set_read_timeout(Some(Duration::from_secs(60)))?;
+                self.terminate()?;
+                Ok(false)
+            }
+            v => {
+                self.restore_timeout()?;
+                v
+            }
+        }
+    }
+
+    fn restore_timeout(&mut self) -> Result<()> {
+        self.session
+            .stream
+            .get_mut()
+            .set_read_timeout(self.old_timeout.take())
     }
 }
 
@@ -163,11 +204,18 @@ impl<'a> SetReadTimeout for TcpStream {
     fn set_read_timeout(&mut self, timeout: Option<Duration>) -> Result<()> {
         TcpStream::set_read_timeout(self, timeout).map_err(Error::Io)
     }
+
+    fn read_timeout(&self) -> Result<Option<Duration>> {
+        TcpStream::read_timeout(self).map_err(Error::Io)
+    }
 }
 
 #[cfg(feature = "tls")]
 impl<'a> SetReadTimeout for TlsStream<TcpStream> {
     fn set_read_timeout(&mut self, timeout: Option<Duration>) -> Result<()> {
         self.get_ref().set_read_timeout(timeout).map_err(Error::Io)
+    }
+    fn read_timeout(&self) -> Result<Option<Duration>> {
+        self.get_ref().read_timeout().map_err(Error::Io)
     }
 }
