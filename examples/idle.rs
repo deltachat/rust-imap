@@ -34,17 +34,7 @@ fn fetch_messages_and_idle(server: &str, login: &str, password: &str) -> imap::e
     println!("got {} messages", messages.len());
     {
         loop {
-            let res = match imap_session.idle() {
-                Ok(mut idle) => {
-                    &idle.set_keepalive(Duration::from_secs(20));
-                    println!("entering idle wait_keepalive");
-                    idle.wait_keepalive()
-                }
-                Err(err) => {
-                    return Err(imap::error::Error::Bad(err.to_string()));
-                }
-            };
-            match res {
+            match imap_session.idle_and_wait(Duration::from_secs(23 * 60)) {
                 Ok(true) => {
                     println!("wait_keepalive returned data, idle-finished");
                     break;

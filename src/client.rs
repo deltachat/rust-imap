@@ -9,6 +9,7 @@ use std::net::{TcpStream, ToSocketAddrs};
 use std::ops::{Deref, DerefMut};
 use std::str;
 use std::sync::mpsc;
+use std::time::Duration;
 
 use super::authenticator::Authenticator;
 use super::error::{Error, ParseError, Result, ValidateError};
@@ -985,8 +986,9 @@ impl<T: Read + Write> Session<T> {
     /// command, as specified in the base IMAP specification.
     ///
     /// See [`extensions::idle::Handle`] for details.
-    pub fn idle(&mut self) -> Result<extensions::idle::Handle<'_, T>> {
-        extensions::idle::Handle::make(self)
+    pub fn idle_and_wait(&mut self, keepalive_interval: Duration) -> Result<bool> {
+        let handle = extensions::idle::Handle::make(self)?;
+        handle.idle_and_wait(keepalive_interval)
     }
 
     /// The [`APPEND` command](https://tools.ietf.org/html/rfc3501#section-6.3.11) appends

@@ -27,8 +27,7 @@ use std::time::Duration;
 #[derive(Debug)]
 pub struct Handle<'a, T: Read + Write> {
     session: &'a mut Session<T>,
-    keepalive: Duration,
-    done: bool,
+    initialized: bool,
 }
 
 /// Must be implemented for a transport in order for a `Session` using that transport to support
@@ -50,13 +49,11 @@ pub trait SetReadTimeout {
 
 impl<'a, T: Read + Write + 'a> Handle<'a, T> {
     pub(crate) fn make(session: &'a mut Session<T>) -> Result<Self> {
-        let mut h = Handle {
+        let mut handle = Handle {
             session,
-            keepalive: Duration::from_secs(29 * 60),
-            done: false,
+            initialized: false,
         };
-        h.init()?;
-        Ok(h)
+        Ok(handle)
     }
 
     fn init(&mut self) -> Result<()> {
@@ -72,72 +69,36 @@ impl<'a, T: Read + Write + 'a> Handle<'a, T> {
         let mut v = Vec::new();
         self.session.readline(&mut v)?;
         if v.starts_with(b"+") {
-            self.done = false;
+            self.initialized = true;
             return Ok(());
         }
 
         self.session.read_response_onto(&mut v)?;
-        // We should *only* get a continuation on an error (i.e., it gives BAD or NO).
+        // We should *only* not get a continuation on an error (i.e., it gives BAD or NO).
         unreachable!();
     }
 
     fn terminate(&mut self) -> Result<()> {
-        if !self.done {
-            self.done = true;
+        if self.initialized {
             self.session.write_line(b"DONE")?;
+            self.initialized = false;
             self.session.stream.get_mut().flush()?;
             self.session.read_response().map(|_| ())
         } else {
             Ok(())
         }
     }
-
-    /// Internal helper that doesn't consume self.
-    ///
-    /// This is necessary so that we can keep using the inner `Session` in `wait_keepalive`.
-    /// return Ok(true) if server reported data, Ok(false) if we ran
-    /// into a timeout but idle-waiting can continue.  Any error means
-    /// that the underlying stream was closed and a reconnect is neccessary
-    fn wait_inner(&mut self) -> Result<bool> {
-        let mut v = Vec::new();
-        match self.session.readline(&mut v) {
-            Err(Error::Io(ref e))
-                if e.kind() == io::ErrorKind::TimedOut || e.kind() == io::ErrorKind::WouldBlock =>
-            {
-                if self.session.debug {
-                    eprintln!("wait_inner got error {:?}", e);
-                }
-                self.terminate()?;
-                Ok(false)
-            }
-            Err(err) => Err(err),
-            Ok(_) => Ok(true),
-        }
-    }
-
-    /// Block until the selected mailbox changes.
-    pub fn wait(mut self) -> Result<bool> {
-        self.wait_inner()
-    }
 }
 
 impl<'a, T: SetReadTimeout + Read + Write + 'a> Handle<'a, T> {
-    /// Set the keep-alive interval to use when `wait_keepalive` is called.
-    ///
-    /// The interval defaults to 29 minutes as dictated by RFC 2177.
-    pub fn set_keepalive(&mut self, interval: Duration) {
-        self.keepalive = interval;
-    }
-
     /// Block until the selected mailbox changes.
     ///
-    /// This method differs from [`Handle::wait`] in that it will periodically refresh the IDLE
-    /// connection, to prevent the server from timing out our connection. The keepalive interval is
-    /// set to 29 minutes by default, as dictated by RFC 2177, but can be changed using
-    /// [`Handle::set_keepalive`].
+    /// This method will periodically refresh the IDLE
+    /// connection, to prevent the server from timing out our connection.
+    /// a typical Duration many mail apps use is 23*60=1380 seconds although
+    /// RFC 2177 recommends 29 minutes.
     ///
-    /// This is the recommended method to use for waiting.
-    pub fn wait_keepalive(self) -> Result<bool> {
+    pub fn idle_and_wait(self, keepalive_interval: Duration) -> Result<bool> {
         // The server MAY consider a client inactive if it has an IDLE command
         // running, and if such a server has an inactivity timeout it MAY log
         // the client off implicitly at the end of its timeout period.  Because
@@ -145,17 +106,14 @@ impl<'a, T: SetReadTimeout + Read + Write + 'a> Handle<'a, T> {
         // re-issue it at least every 29 minutes to avoid being logged off.
         // This still allows a client to receive immediate mailbox updates even
         // though it need only "poll" at half hour intervals.
-        let keepalive = self.keepalive;
-        self.wait_timeout(keepalive)
-    }
 
-    /// Block until the selected mailbox changes, or until the given amount of time has expired.
-    pub fn wait_timeout(mut self, timeout: Duration) -> Result<bool> {
         let mut old_timeout = self.session.stream.get_mut().read_timeout()?;
+        self.init()?;
+
         self.session
             .stream
             .get_mut()
-            .set_read_timeout(Some(timeout))?;
+            .set_read_timeout(Some(keepalive_interval))?;
 
         let mut v = Vec::new();
 
