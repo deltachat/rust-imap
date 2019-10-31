@@ -29,7 +29,6 @@ pub struct Handle<'a, T: Read + Write> {
     session: &'a mut Session<T>,
     keepalive: Duration,
     done: bool,
-    old_timeout: Option<Duration>,
 }
 
 /// Must be implemented for a transport in order for a `Session` using that transport to support
@@ -55,7 +54,6 @@ impl<'a, T: Read + Write + 'a> Handle<'a, T> {
             session,
             keepalive: Duration::from_secs(29 * 60),
             done: false,
-            old_timeout: None,
         };
         h.init()?;
         Ok(h)
@@ -153,18 +151,15 @@ impl<'a, T: SetReadTimeout + Read + Write + 'a> Handle<'a, T> {
 
     /// Block until the selected mailbox changes, or until the given amount of time has expired.
     pub fn wait_timeout(mut self, timeout: Duration) -> Result<bool> {
-        self.old_timeout = self.session.stream.get_mut().read_timeout()?;
+        let mut old_timeout = self.session.stream.get_mut().read_timeout()?;
         self.session
             .stream
             .get_mut()
             .set_read_timeout(Some(timeout))?;
-        self.wait_inner_keepalive()
-    }
 
-    fn wait_inner_keepalive(&mut self) -> Result<bool> {
         let mut v = Vec::new();
 
-        match self.session.readline(&mut v).map(|_| true) {
+        let res = match self.session.readline(&mut v).map(|_| true) {
             Err(Error::Io(ref e))
                 if e.kind() == io::ErrorKind::TimedOut || e.kind() == io::ErrorKind::WouldBlock =>
             {
@@ -178,18 +173,13 @@ impl<'a, T: SetReadTimeout + Read + Write + 'a> Handle<'a, T> {
                 self.terminate()?;
                 Ok(false)
             }
-            v => {
-                self.restore_timeout()?;
-                v
-            }
-        }
-    }
-
-    fn restore_timeout(&mut self) -> Result<()> {
+            v => v,
+        };
         self.session
             .stream
             .get_mut()
-            .set_read_timeout(self.old_timeout.take())
+            .set_read_timeout(old_timeout.take())?;
+        res
     }
 }
 
