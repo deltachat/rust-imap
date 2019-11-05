@@ -49,7 +49,7 @@ pub trait SetReadTimeout {
 
 impl<'a, T: Read + Write + 'a> Handle<'a, T> {
     pub(crate) fn make(session: &'a mut Session<T>) -> Result<Self> {
-        let mut handle = Handle {
+        let handle = Handle {
             session,
             initialized: false,
         };
@@ -98,7 +98,7 @@ impl<'a, T: SetReadTimeout + Read + Write + 'a> Handle<'a, T> {
     /// a typical Duration many mail apps use is 23*60=1380 seconds although
     /// RFC 2177 recommends 29 minutes.
     ///
-    pub fn idle_and_wait(self, keepalive_interval: Duration) -> Result<bool> {
+    pub fn idle_and_wait(&mut self, keepalive_interval: Duration) -> Result<bool> {
         // The server MAY consider a client inactive if it has an IDLE command
         // running, and if such a server has an inactivity timeout it MAY log
         // the client off implicitly at the end of its timeout period.  Because

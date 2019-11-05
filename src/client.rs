@@ -11,6 +11,8 @@ use std::str;
 use std::sync::mpsc;
 use std::time::Duration;
 
+use crate::extensions::idle::SetReadTimeout;
+
 use super::authenticator::Authenticator;
 use super::error::{Error, ParseError, Result, ValidateError};
 use super::extensions;
@@ -986,8 +988,11 @@ impl<T: Read + Write> Session<T> {
     /// command, as specified in the base IMAP specification.
     ///
     /// See [`extensions::idle::Handle`] for details.
-    pub fn idle_and_wait(&mut self, keepalive_interval: Duration) -> Result<bool> {
-        let handle = extensions::idle::Handle::make(self)?;
+    pub fn idle_and_wait(&mut self, keepalive_interval: Duration) -> Result<bool> 
+    where
+        T: SetReadTimeout + Read + Write,
+    {
+        let mut handle = extensions::idle::Handle::make(self)?;
         handle.idle_and_wait(keepalive_interval)
     }
 
